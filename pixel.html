@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Pixel Painter</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; min-height: 100vh; font-family: -apple-system, Arial, sans-serif; background: #1a1a2e; color: #fff; user-select: none; -webkit-user-select: none; touch-action: manipulation; overflow-x: hidden; }
+#app { max-width: 500px; margin: 0 auto; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+#topbar { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 8px 4px; }
+#title { font-size: 20px; font-weight: 900; color: #ffd700; text-shadow: 0 0 15px rgba(255,215,0,0.5); }
+#topbar .info { font-size: 12px; color: #94a3b8; }
+#btnSettings { background: #334155; color: #fff; border: none; border-radius: 8px; padding: 8px 12px; font-size: 16px; cursor: pointer; }
+
+#canvasWrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #0a0e1a;
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+  border: 2px solid #334155;
+  overflow: auto;
+}
+#gridScroll { width: 100%; height: 100%; overflow: auto; display: flex; align-items: center; justify-content: center; }
+#grid {
+  display: grid;
+  background: #1e293b;
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.px { background: #1e293b; }
+
+#toolbar { display: flex; gap: 8px; width: 100%; justify-content: center; flex-wrap: wrap; }
+.tool {
+  padding: 10px 14px; border: 2px solid #334155; background: #1e293b; color: #fff;
+  border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer;
+}
+.tool.active { background: #4a90d9; border-color: #60a5fa; }
+.tool:active { transform: scale(0.95); }
+
+#palette { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; width: 100%; padding: 4px; }
+.swatch {
+  aspect-ratio: 1 / 1; border-radius: 6px; cursor: pointer;
+  border: 2px solid transparent;
+}
+.swatch.active { border-color: #fff; transform: scale(1.15); box-shadow: 0 0 10px rgba(255,255,255,0.5); }
+
+#actions { display: flex; gap: 8px; width: 100%; justify-content: center; flex-wrap: wrap; margin-bottom: 10px; }
+.btn {
+  padding: 12px 18px; border: none; border-radius: 10px; font-size: 13px; font-weight: bold;
+  cursor: pointer; color: #fff; min-width: 95px;
+}
+.btn.primary { background: linear-gradient(135deg, #4a9c4a, #2d7a2d); }
+.btn.warn { background: linear-gradient(135deg, #d97706, #b45309); }
+.btn.danger { background: linear-gradient(135deg, #dc2626, #991b1b); }
+.btn.blue { background: linear-gradient(135deg, #4a90d9, #2563eb); }
+.btn:active { transform: scale(0.95); }
+
+/* Modal Settings */
+#settingsModal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: none; align-items: center; justify-content: center;
+  z-index: 200; padding: 20px;
+}
+#settingsModal.show { display: flex; }
+#settingsBox {
+  background: #1e293b;
+  border: 2px solid #334155;
+  border-radius: 16px;
+  padding: 24px;
+  width: 100%; max-width: 380px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+#settingsBox h2 { color: #ffd700; text-align: center; margin-bottom: 20px; font-size: 22px; }
+.setting-group { margin-bottom: 20px; }
+.setting-label { font-size: 14px; font-weight: bold; color: #fff; margin-bottom: 8px; display: block; }
+.setting-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.setting-opt {
+  padding: 10px;
+  background: #0f172a;
+  border: 2px solid #334155;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  text-align: center;
+}
+.setting-opt.active { background: #4a90d9; border-color: #60a5fa; }
+.setting-opt:active { transform: scale(0.95); }
+.settings-actions { display: flex; gap: 8px; margin-top: 20px; }
+.settings-actions .btn { flex: 1; }
+.warning-text { font-size: 12px; color: #fb923c; margin-top: 6px; text-align: center; }
+
+#toast {
+  position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.9); color: #fff; padding: 12px 20px; border-radius: 10px;
+  font-weight: bold; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 300;
+}
+#toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div id="title">🎨 PIXEL PAINTER</div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span class="info" id="gridInfo">32 × 32</span>
+      <button id="btnSettings">⚙️</button>
+    </div>
+  </div>
+
+  <div id="canvasWrap">
+    <div id="gridScroll">
+      <div id="grid"></div>
+    </div>
+  </div>
+
+  <div id="toolbar">
+    <button class="tool active" data-tool="pencil">✏️ Pencil</button>
+    <button class="tool" data-tool="eraser">🧽 Eraser</button>
+    <button class="tool" data-tool="fill">🪣 Fill</button>
+    <button class="tool" data-tool="picker">💧 Picker</button>
+  </div>
+
+  <div id="palette"></div>
+
+  <div id="actions">
+    <button class="btn blue" id="btnUndo">↶ Undo</button>
+    <button class="btn warn" id="btnClear">🗑 Clear</button>
+    <button class="btn primary" id="btnSave">💾 Simpan</button>
+  </div>
+</div>
+
+<div id="settingsModal">
+  <div id="settingsBox">
+    <h2>⚙️ SETTINGS</h2>
+
+    <div class="setting-group">
+      <span class="setting-label">📐 Ukuran Grid</span>
+      <div class="setting-options" id="gridOptions">
+        <div class="setting-opt" data-grid="8">8×8</div>
+        <div class="setting-opt" data-grid="16">16×16</div>
+        <div class="setting-opt" data-grid="24">24×24</div>
+        <div class="setting-opt" data-grid="32">32×32</div>
+        <div class="setting-opt" data-grid="48">48×48</div>
+        <div class="setting-opt" data-grid="64">64×64</div>
+      </div>
+    </div>
+
+    <div class="setting-group">
+      <span class="setting-label">🔍 Zoom Kanvas</span>
+      <div class="setting-options" id="zoomOptions">
+        <div class="setting-opt" data-zoom="50">50%</div>
+        <div class="setting-opt" data-zoom="75">75%</div>
+        <div class="setting-opt" data-zoom="100">100%</div>
+        <div class="setting-opt" data-zoom="125">125%</div>
+        <div class="setting-opt" data-zoom="150">150%</div>
+        <div class="setting-opt" data-zoom="200">200%</div>
+      </div>
+    </div>
+
+    <div class="warning-text">⚠️ Ganti ukuran grid akan menghapus gambar</div>
+
+    <div class="settings-actions">
+      <button class="btn warn" id="btnCancelSettings">Batal</button>
+      <button class="btn primary" id="btnApplySettings">✔ Terapkan</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+(function(){
+  const gridEl = document.getElementById('grid');
+  const paletteEl = document.getElementById('palette');
+  const toast = document.getElementById('toast');
+  const gridInfo = document.getElementById('gridInfo');
+  const settingsModal = document.getElementById('settingsModal');
+
+  // ===== STATE =====
+  let GRID = 32;
+  let ZOOM = 100;
+  let currentColor = '#000000';
+  let currentTool = 'pencil';
+  let pixels = [];
+  let history = [];
+  let isDrawing = false;
+  let pendingGrid = 32;
+  let pendingZoom = 100;
+
+  const COLORS = [
+    '#000000', '#ffffff', '#7f7f7f', '#c3c3c3',
+    '#ff0000', '#ff7f00', '#ffff00', '#7fff00',
+    '#00ff00', '#00ff7f', '#00ffff', '#007fff',
+    '#0000ff', '#7f00ff', '#ff00ff', '#ff007f',
+    '#7f0000', '#7f3f00', '#7f7f00', '#3f7f00',
+    '#007f00', '#007f3f', '#007f7f', '#003f7f',
+    '#00007f', '#3f007f', '#7f007f', '#7f003f',
+    '#ffb6c1', '#8b4513', '#ffd700', '#40e0d0',
+    '#dda0dd', '#98fb98', '#f08080', '#add8e6',
+    '#ffffe0', '#ffe4e1', '#e6e6fa', '#f5deb3'
+  ];
+
+  // ===== LOAD SETTINGS =====
+  function loadSettings() {
+    try {
+      const s = localStorage.getItem('pixel_settings');
+      if (s) {
+        const d = JSON.parse(s);
+        GRID = d.grid || 32;
+        ZOOM = d.zoom || 100;
+      }
+    } catch(e) {}
+  }
+  function saveSettings() {
+    try { localStorage.setItem('pixel_settings', JSON.stringify({ grid: GRID, zoom: ZOOM })); } catch(e) {}
+  }
+
+  // ===== INIT PIXELS =====
+  function initPixels() {
+    pixels = [];
+    for (let y = 0; y < GRID; y++) {
+      const row = [];
+      for (let x = 0; x < GRID; x++) row.push('#1e293b');
+      pixels.push(row);
+    }
+  }
+
+  // ===== RENDER GRID =====
+  function renderGrid() {
+    gridEl.innerHTML = '';
+    gridEl.style.gridTemplateColumns = 'repeat(' + GRID + ', 1fr)';
+    gridEl.style.gridTemplateRows = 'repeat(' + GRID + ', 1fr)';
+
+    // Ukuran canvas berdasarkan zoom
+    const container = document.getElementById('canvasWrap');
+    const cw = container.clientWidth - 12;
+    const baseSize = Math.min(cw, 460);
+    const size = baseSize * (ZOOM / 100);
+    gridEl.style.width = size + 'px';
+    gridEl.style.height = size + 'px';
+
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        const px = document.createElement('div');
+        px.className = 'px';
+        px.dataset.x = x;
+        px.dataset.y = y;
+        px.style.background = pixels[y][x];
+        gridEl.appendChild(px);
+      }
+    }
+    gridInfo.textContent = GRID + ' × ' + GRID + ' (' + ZOOM + '%)';
+  }
+
+  // ===== RENDER PALETTE =====
+  function renderPalette() {
+    paletteEl.innerHTML = '';
+    COLORS.forEach(c => {
+      const sw = document.createElement('div');
+      sw.className = 'swatch' + (c === currentColor ? ' active' : '');
+      sw.style.background = c;
+      sw.addEventListener('click', () => {
+        currentColor = c;
+        renderPalette();
+      });
+      paletteEl.appendChild(sw);
+    });
+  }
+
+  // ===== GET PIXEL =====
+  function getPixelAt(clientX, clientY) {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (el && el.classList.contains('px')) {
+      return { x: parseInt(el.dataset.x), y: parseInt(el.dataset.y) };
+    }
+    return null;
+  }
+
+  // ===== PAINT PIXEL =====
+  function paintPixel(x, y) {
+    if (x < 0 || x >= GRID || y < 0 || y >= GRID) return;
+
+    if (currentTool === 'pencil') {
+      if (pixels[y][x] === currentColor) return;
+      pixels[y][x] = currentColor;
+    } else if (currentTool === 'eraser') {
+      if (pixels[y][x] === '#1e293b') return;
+      pixels[y][x] = '#1e293b';
+    } else if (currentTool === 'picker') {
+      currentColor = pixels[y][x];
+      renderPalette();
+      showToast('Ambil warna: ' + currentColor);
+      return;
+    }
+
+    const idx = y * GRID + x;
+    const px = gridEl.children[idx];
+    if (px) px.style.background = pixels[y][x];
+  }
+
+  // ===== FILL =====
+  function fillArea(x, y) {
+    const target = pixels[y][x];
+    const newColor = currentTool === 'eraser' ? '#1e293b' : currentColor;
+    if (target === newColor) return;
+    const stack = [[x, y]];
+    while (stack.length) {
+      const [cx, cy] = stack.pop();
+      if (cx < 0 || cx >= GRID || cy < 0 || cy >= GRID) continue;
+      if (pixels[cy][cx] !== target) continue;
+      pixels[cy][cx] = newColor;
+      const px = gridEl.children[cy * GRID + cx];
+      if (px) px.style.background = newColor;
+      stack.push([cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]);
+    }
+  }
+
+  // ===== HISTORY =====
+  function pushHistory() {
+    history.push(pixels.map(r => r.slice()));
+    if (history.length > 30) history.shift();
+  }
+
+  function undo() {
+    if (history.length === 0) { showToast('Nggak ada yang bisa di-undo'); return; }
+    pixels = history.pop();
+    renderGrid();
+    showToast('↶ Undo');
+  }
+
+  function clearCanvas() {
+    if (!confirm('Hapus semua gambar?')) return;
+    pushHistory();
+    initPixels();
+    renderGrid();
+    showToast('🗑 Kosong!');
+  }
+
+  // ===== SAVE PNG =====
+  function savePNG() {
+    const cv = document.createElement('canvas');
+    cv.width = GRID;
+    cv.height = GRID;
+    const ctx = cv.getContext('2d');
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        ctx.fillStyle = pixels[y][x];
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    const cv2 = document.createElement('canvas');
+    cv2.width = 1024;
+    cv2.height = 1024;
+    const ctx2 = cv2.getContext('2d');
+    ctx2.imageSmoothingEnabled = false;
+    ctx2.drawImage(cv, 0, 0, 1024, 1024);
+
+    const dataURL = cv2.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = dataURL;
+    a.download = 'pixelart_' + GRID + 'x' + GRID + '_' + Date.now() + '.png';
+    a.click();
+    showToast('💾 Tersimpan!');
+  }
+
+  // ===== TOAST =====
+  let toastTimer;
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 1500);
+  }
+
+  // ===== TOOLS =====
+  document.querySelectorAll('.tool').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.tool').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      currentTool = t.dataset.tool;
+    });
+  });
+
+  document.getElementById('btnUndo').addEventListener('click', undo);
+  document.getElementById('btnClear').addEventListener('click', clearCanvas);
+  document.getElementById('btnSave').addEventListener('click', savePNG);
+
+  // ===== SETTINGS =====
+  function openSettings() {
+    pendingGrid = GRID;
+    pendingZoom = ZOOM;
+    updateSettingsUI();
+    settingsModal.classList.add('show');
+  }
+
+  function updateSettingsUI() {
+    document.querySelectorAll('#gridOptions .setting-opt').forEach(o => {
+      o.classList.toggle('active', parseInt(o.dataset.grid) === pendingGrid);
+    });
+    document.querySelectorAll('#zoomOptions .setting-opt').forEach(o => {
+      o.classList.toggle('active', parseInt(o.dataset.zoom) === pendingZoom);
+    });
+  }
+
+  document.getElementById('btnSettings').addEventListener('click', openSettings);
+  document.getElementById('btnCancelSettings').addEventListener('click', () => {
+    settingsModal.classList.remove('show');
+  });
+
+  document.querySelectorAll('#gridOptions .setting-opt').forEach(o => {
+    o.addEventListener('click', () => {
+      pendingGrid = parseInt(o.dataset.grid);
+      updateSettingsUI();
+    });
+  });
+
+  document.querySelectorAll('#zoomOptions .setting-opt').forEach(o => {
+    o.addEventListener('click', () => {
+      pendingZoom = parseInt(o.dataset.zoom);
+      updateSettingsUI();
+    });
+  });
+
+  document.getElementById('btnApplySettings').addEventListener('click', () => {
+    const gridChanged = pendingGrid !== GRID;
+    GRID = pendingGrid;
+    ZOOM = pendingZoom;
+    saveSettings();
+
+    if (gridChanged) {
+      if (!confirm('Ganti ukuran grid akan menghapus gambar. Lanjut?')) {
+        return;
+      }
+      initPixels();
+      history = [];
+    }
+    renderGrid();
+    settingsModal.classList.remove('show');
+    showToast('✅ Settings diterapkan');
+  });
+
+  // ===== DRAW HANDLERS =====
+  function startDraw(e) {
+    e.preventDefault();
+    isDrawing = true;
+    pushHistory();
+    const t = e.touches ? e.touches[0] : e;
+    const p = getPixelAt(t.clientX, t.clientY);
+    if (!p) return;
+    if (currentTool === 'fill') {
+      fillArea(p.x, p.y);
+    } else {
+      paintPixel(p.x, p.y);
+    }
+  }
+
+  function moveDraw(e) {
+    if (!isDrawing) return;
+    e.preventDefault();
+    const t = e.touches ? e.touches[0] : e;
+    const p = getPixelAt(t.clientX, t.clientY);
+    if (!p) return;
+    paintPixel(p.x, p.y);
+  }
+
+  function endDraw() { isDrawing = false; }
+
+  gridEl.addEventListener('mousedown', startDraw);
+  gridEl.addEventListener('mousemove', moveDraw);
+  document.addEventListener('mouseup', endDraw);
+  gridEl.addEventListener('touchstart', startDraw, { passive: false });
+  gridEl.addEventListener('touchmove', moveDraw, { passive: false });
+  document.addEventListener('touchend', endDraw);
+  gridEl.addEventListener('contextmenu', e => e.preventDefault());
+
+  // ===== INIT =====
+  loadSettings();
+  initPixels();
+  renderGrid();
+  renderPalette();
+
+})();
+</script>
+</body>
+</html>
