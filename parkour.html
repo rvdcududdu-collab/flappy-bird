@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Parkour Runner</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; background: #1a1a2e; overflow: hidden; touch-action: manipulation; user-select: none; font-family: Arial; color: #fff; }
+#wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+canvas { background: #87ceeb; display: block; touch-action: none; }
+#hud { position: fixed; top: 10px; left: 0; right: 0; display: flex; justify-content: space-around; color: #fff; font-weight: bold; font-size: 16px; z-index: 5; pointer-events: none; text-shadow: 2px 2px 0 #000; }
+#hud .coin { color: #ffd700; }
+#menu, #shop { position: fixed; inset: 0; background: rgba(0,0,0,0.92); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; z-index: 10; text-align: center; padding: 20px; overflow-y: auto; }
+#menu h1 { color: #ffd700; margin: 20px 0 10px; font-size: 30px; text-shadow: 0 0 20px rgba(255,215,0,0.6); }
+#menu p { margin: 5px 0; color: #ddd; font-size: 14px; }
+#menu .coinDisplay { font-size: 22px; color: #ffd700; margin: 15px 0; font-weight: bold; }
+.menu-btn { margin: 6px; padding: 14px 40px; font-size: 17px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; min-width: 240px; }
+.menu-btn.play { background: #4a9c4a; color: #fff; }
+.menu-btn.shop { background: #ff9800; color: #fff; }
+.menu-btn.reset { background: #666; color: #fff; font-size: 13px; padding: 10px 20px; min-width: 140px; margin-top: 20px; }
+.menu-btn.back { background: #666; color: #fff; padding: 10px 25px; margin: 15px; }
+#shop h1 { color: #ffd700; margin: 15px 0; font-size: 26px; }
+.shop-coins { font-size: 20px; color: #ffd700; margin-bottom: 15px; font-weight: bold; }
+.shop-item { width: 100%; max-width: 420px; background: #1a1a30; border: 2px solid #333; border-radius: 12px; padding: 12px 16px; margin: 6px 0; display: flex; justify-content: space-between; align-items: center; }
+.shop-item.bought { border-color: #4a9c4a; }
+.shop-item.maxed { border-color: #ffd700; background: #2a2000; }
+.shop-info { text-align: left; flex: 1; }
+.shop-name { font-size: 16px; font-weight: bold; color: #fff; }
+.shop-desc { font-size: 12px; color: #aaa; margin-top: 2px; }
+.shop-level { font-size: 12px; color: #4a9c4a; margin-top: 4px; }
+.shop-buy { padding: 10px 18px; border: none; border-radius: 8px; background: #4a9c4a; color: #fff; font-weight: bold; cursor: pointer; font-size: 14px; min-width: 80px; }
+.shop-buy:disabled { background: #444; color: #888; cursor: not-allowed; }
+.shop-buy.maxed { background: #ffd700; color: #000; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="500" height="700"></canvas></div>
+<div id="hud" class="hidden">
+  <span>🏆 <span id="skor">0</span></span>
+  <span class="coin">💰 <span id="koin">0</span></span>
+  <span>🥇 <span id="best">0</span></span>
+</div>
+<div id="menu">
+  <h1>🏃 PARKOUR RUNNER</h1>
+  <p>Tap layar untuk LOMPAT</p>
+  <p>Tap 2x untuk DOUBLE JUMP</p>
+  <p>Kumpulkan koin 💰 buat upgrade!</p>
+  <div class="coinDisplay">💰 Total Koin: <span id="menuKoin">0</span></div>
+  <button class="menu-btn play" id="btnPlay">▶ MAIN</button>
+  <button class="menu-btn shop" id="btnShop">🛒 SHOP</button>
+  <button class="menu-btn reset" id="btnReset">🔄 Reset Progress</button>
+</div>
+<div id="shop" class="hidden">
+  <h1>🛒 SHOP UPGRADE</h1>
+  <div class="shop-coins">💰 <span id="shopKoin">0</span></div>
+  <div id="shopList"></div>
+  <button class="menu-btn back" id="btnBack">◀ Kembali</button>
+</div>
+<script>
+(function(){
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  const menu = document.getElementById('menu');
+  const shop = document.getElementById('shop');
+  const shopList = document.getElementById('shopList');
+  const hud = document.getElementById('hud');
+  const skorEl = document.getElementById('skor');
+  const koinEl = document.getElementById('koin');
+  const bestEl = document.getElementById('best');
+  const menuKoinEl = document.getElementById('menuKoin');
+  const shopKoinEl = document.getElementById('shopKoin');
+
+  const W = cv.width, H = cv.height;
+  const GROUND_Y = H - 180;
+  const GRAVITY = 0.9;
+  const JUMP_FORCE = -17;
+
+  const UPGRADES = {
+    speed: { name: '⚡ Speed Boost', desc: '+0.6 kecepatan per level', max: 5, cost: [50, 100, 200, 400, 800] },
+    jump: { name: '🦘 Extra Jump', desc: '+1 lompatan per level', max: 3, cost: [200, 500, 1000] },
+    magnet: { name: '🧲 Magnet Koin', desc: 'Tarik koin dari jarak jauh', max: 3, cost: [150, 350, 700] },
+    shield: { name: '🛡️ Shield', desc: 'Tahan 1 hit rintangan', max: 3, cost: [300, 600, 1200] },
+    slowmo: { name: '⏱️ Slow Motion', desc: 'Perlambat dunia 5%', max: 3, cost: [400, 800, 1600] }
+  };
+
+  let data = { totalKoin: 0, best: 0, upgrades: { speed: 0, jump: 0, magnet: 0, shield: 0, slowmo: 0 } };
+  function load() {
+    try { const s = localStorage.getItem('parkour_data'); if (s) data = JSON.parse(s); } catch(e) {}
+  }
+  function save() { try { localStorage.setItem('parkour_data', JSON.stringify(data)); } catch(e) {} }
+  load();
+
+  let player, obstacles, coins, particles, score, sessionCoins, alive, loopId, frame, jumpsLeft, spawnTimer, coinTimer, clouds;
+  let speed, baseSpeed, shieldActive, magnetRadius, jumpMax;
+
+  function getSpeedBonus() { return data.upgrades.speed * 0.6; }
+  function getJumpMax() { return 2 + data.upgrades.jump; }
+  function getMagnet() { return data.upgrades.magnet > 0 ? 100 + data.upgrades.magnet * 60 : 0; }
+  function getShield() { return data.upgrades.shield; }
+  function getSlowFactor() { return 1 - data.upgrades.slowmo * 0.05; }
+
+  function init() {
+    baseSpeed = 7 + getSpeedBonus();
+    speed = baseSpeed * getSlowFactor();
+    jumpMax = getJumpMax();
+    magnetRadius = getMagnet();
+    shieldActive = getShield();
+    player = { x: 80, y: GROUND_Y, w: 40, h: 60, vy: 0, onGround: true, rot: 0 };
+    obstacles = [];
+    coins = [];
+    particles = [];
+    clouds = [];
+    for (let i = 0; i < 5; i++) clouds.push({ x: Math.random() * W, y: 50 + Math.random() * 200, s: 0.5 + Math.random() });
+    score = 0;
+    sessionCoins = 0;
+    alive = true;
+    frame = 0;
+    jumpsLeft = jumpMax;
+    spawnTimer = 60;
+    coinTimer = 90;
+    skorEl.textContent = '0';
+    koinEl.textContent = '0';
+  }
+
+  function jump() {
+    if (!alive) return;
+    if (jumpsLeft > 0) {
+      player.vy = JUMP_FORCE;
+      player.onGround = false;
+      jumpsLeft--;
+    }
+  }
+
+  function spawnObstacle() {
+    const types = ['spike', 'box', 'tall'];
+    const t = types[Math.floor(Math.random() * types.length)];
+    let o;
+    if (t === 'spike') o = { x: W, y: GROUND_Y + 40, w: 30, h: 30, color: '#d33', type: 'spike' };
+    else if (t === 'box') o = { x: W, y: GROUND_Y + 20, w: 45, h: 50, color: '#8b4513', type: 'box' };
+    else o = { x: W, y: GROUND_Y - 20, w: 30, h: 90, color: '#666', type: 'tall' };
+    obstacles.push(o);
+  }
+
+  function spawnCoin() {
+    const count = 1 + Math.floor(Math.random() * 3);
+    const yBase = GROUND_Y - 40 - Math.random() * 100;
+    for (let i = 0; i < count; i++) {
+      coins.push({
+        x: W + i * 30,
+        y: yBase + Math.sin(i * 0.6) * 20,
+        r: 12,
+        collected: false,
+        bobbing: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  function spawnParticles(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 6,
+        vy: (Math.random() - 0.5) * 6 - 2,
+        life: 30 + Math.random() * 20,
+        maxLife: 50,
+        color: color,
+        size: 2 + Math.random() * 3
+      });
+    }
+  }
+
+  function update() {
+    if (!alive) return;
+    frame++;
+    speed = (baseSpeed + Math.floor(frame / 400) * 0.5) * getSlowFactor();
+
+    player.vy += GRAVITY;
+    player.y += player.vy;
+    if (player.y >= GROUND_Y) {
+      player.y = GROUND_Y;
+      player.vy = 0;
+      player.onGround = true;
+      jumpsLeft = jumpMax;
+    }
+    if (!player.onGround) player.rot += 0.15;
+    else player.rot = 0;
+
+    score++;
+    skorEl.textContent = score;
+
+    spawnTimer--;
+    if (spawnTimer <= 0) {
+      spawnObstacle();
+      spawnTimer = Math.max(40, 90 - Math.floor(frame / 100) * 5) + Math.floor(Math.random() * 30);
+    }
+    coinTimer--;
+    if (coinTimer <= 0) {
+      spawnCoin();
+      coinTimer = 100 + Math.floor(Math.random() * 100);
+    }
+
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      obstacles[i].x -= speed;
+      if (obstacles[i].x + obstacles[i].w < 0) obstacles.splice(i, 1);
+    }
+
+    const pcx = player.x + player.w / 2;
+    const pcy = player.y - player.h / 2;
+    for (let i = coins.length - 1; i >= 0; i--) {
+      const co = coins[i];
+      if (magnetRadius > 0) {
+        const dx = pcx - co.x;
+        const dy = pcy - co.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < magnetRadius) {
+          const f = (1 - dist / magnetRadius) * 0.6;
+          co.x += (dx / dist) * f;
+          co.y += (dy / dist) * f;
+        }
+      }
+      co.x -= speed;
+      co.bobbing += 0.15;
+      const dx2 = pcx - co.x;
+      const dy2 = pcy - co.y;
+      if (Math.sqrt(dx2 * dx2 + dy2 * dy2) < co.r + 30) {
+        co.collected = true;
+        sessionCoins++;
+        data.totalKoin++;
+        koinEl.textContent = sessionCoins;
+        spawnParticles(co.x, co.y, '#ffd700', 8);
+        save();
+      }
+      if (co.x + co.r < 0 || co.collected) coins.splice(i, 1);
+    }
+
+    for (const c of clouds) {
+      c.x -= 0.5 * c.s;
+      if (c.x < -80) { c.x = W + 50; c.y = 50 + Math.random() * 200; }
+    }
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.3;
+      p.life--;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    const pBox = { x: player.x + 8, y: player.y - player.h + 5, w: player.w - 16, h: player.h - 5 };
+    for (const o of obstacles) {
+      let hit = false;
+      if (o.type === 'box') {
+        const oBox = { x: o.x, y: o.y - o.h, w: o.w, h: o.h };
+        if (pBox.x < oBox.x + oBox.w && pBox.x + pBox.w > oBox.x && pBox.y < oBox.y + oBox.h && pBox.y + pBox.h > oBox.y) hit = true;
+      } else {
+        if (pBox.x < o.x + o.w && pBox.x + pBox.w > o.x && pBox.y < o.y && pBox.y + pBox.h > o.y - o.h) hit = true;
+      }
+      if (hit) {
+        if (shieldActive > 0) {
+          shieldActive--;
+          spawnParticles(player.x + 20, player.y - 30, '#4a90d9', 15);
+          const idx = obstacles.indexOf(o);
+          if (idx >= 0) obstacles.splice(idx, 1);
+        } else {
+          alive = false;
+        }
+      }
+    }
+
+    if (!alive) {
+      if (score > data.best) data.best = score;
+      save();
+      setTimeout(() => { showMenu(); }, 400);
+    }
+  }
+
+  function draw() {
+    const grad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+    grad.addColorStop(0, '#87ceeb');
+    grad.addColorStop(1, '#b0e0e6');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, GROUND_Y);
+
+    for (const c of clouds) {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 25 * c.s, 0, Math.PI * 2);
+      ctx.arc(c.x + 25 * c.s, c.y, 30 * c.s, 0, Math.PI * 2);
+      ctx.arc(c.x + 55 * c.s, c.y, 25 * c.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = '#228b22';
+    ctx.fillRect(0, GROUND_Y + 60, W, H - GROUND_Y - 60);
+    ctx.fillStyle = '#1a6b1a';
+    ctx.fillRect(0, GROUND_Y + 60, W, 8);
+    ctx.fillStyle = '#32cd32';
+    for (let i = 0; i < W + 30; i += 15) {
+      const ox = (i - frame * speed * 0.5) % (W + 30) - 15;
+      ctx.beginPath();
+      ctx.moveTo(ox, GROUND_Y + 60);
+      ctx.lineTo(ox + 5, GROUND_Y + 55);
+      ctx.lineTo(ox + 10, GROUND_Y + 60);
+      ctx.fill();
+    }
+
+    for (const co of coins) {
+      const bob = Math.sin(co.bobbing) * 3;
+      ctx.fillStyle = 'rgba(255,215,0,0.3)';
+      ctx.beginPath();
+      ctx.arc(co.x, co.y + bob, co.r + 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffd700';
+      ctx.beginPath();
+      ctx.arc(co.x, co.y + bob, co.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#b8860b';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#b8860b';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('$', co.x, co.y + bob + 1);
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+    }
+
+    for (const o of obstacles) {
+      if (o.type === 'spike') {
+        ctx.fillStyle = o.color;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(o.x + i * 10, o.y);
+          ctx.lineTo(o.x + i * 10 + 5, o.y - 25);
+          ctx.lineTo(o.x + i * 10 + 10, o.y);
+          ctx.closePath();
+          ctx.fill();
+        }
+      } else if (o.type === 'box') {
+        ctx.fillStyle = o.color;
+        ctx.fillRect(o.x, o.y - o.h, o.w, o.h);
+        ctx.strokeStyle = '#5a2a0a';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(o.x, o.y - o.h, o.w, o.h);
+        ctx.beginPath();
+        ctx.moveTo(o.x, o.y - o.h + 15);
+        ctx.lineTo(o.x + o.w, o.y - o.h + 15);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = o.color;
+        ctx.fillRect(o.x, o.y - o.h, o.w, o.h);
+        ctx.fillStyle = '#444';
+        ctx.fillRect(o.x + 5, o.y - o.h + 5, o.w - 10, 5);
+      }
+    }
+
+    for (const p of particles) {
+      ctx.globalAlpha = p.life / p.maxLife;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.save();
+    ctx.translate(player.x + player.w / 2, player.y - player.h / 2);
+    if (!player.onGround) ctx.rotate(player.rot);
+    ctx.fillStyle = '#2196f3';
+    ctx.fillRect(-player.w/2, -player.h/2, player.w, player.h);
+    ctx.strokeStyle = '#0d47a1';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-player.w/2, -player.h/2, player.w, player.h);
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(8, -15, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(10, -15, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(8, 0, 6, 0, Math.PI);
+    ctx.stroke();
+    const legPhase = Math.sin(frame * 0.4) * 10;
+    ctx.strokeStyle = '#0d47a1';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-10, player.h/2);
+    ctx.lineTo(-10 - legPhase, player.h/2 + 10);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(10, player.h/2);
+    ctx.lineTo(10 + legPhase, player.h/2 + 10);
+    ctx.stroke();
+    if (shieldActive > 0) {
+      ctx.strokeStyle = 'rgba(74,144,217,0.8)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, 50, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(74,144,217,0.2)';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function loop() {
+    update();
+    draw();
+    loopId = requestAnimationFrame(loop);
+  }
+
+  function start() {
+    init();
+    menu.classList.add('hidden');
+    shop.classList.add('hidden');
+    hud.classList.remove('hidden');
+    if (loopId) cancelAnimationFrame(loopId);
+    loop();
+  }
+
+  function showMenu() {
+    if (loopId) cancelAnimationFrame(loopId);
+    loopId = null;
+    menu.classList.remove('hidden');
+    shop.classList.add('hidden');
+    hud.classList.add('hidden');
+    menuKoinEl.textContent = data.totalKoin;
+    bestEl.textContent = data.best;
+  }
+
+  function renderShop() {
+    shopKoinEl.textContent = data.totalKoin;
+    shopList.innerHTML = '';
+    for (const key in UPGRADES) {
+      const u = UPGRADES[key];
+      const lvl = data.upgrades[key];
+      const maxed = lvl >= u.max;
+      const cost = maxed ? 0 : u.cost[lvl];
+      const canBuy = !maxed && data.totalKoin >= cost;
+      const item = document.createElement('div');
+      item.className = 'shop-item' + (maxed ? ' maxed' : (lvl > 0 ? ' bought' : ''));
+      item.innerHTML = '<div class="shop-info"><div class="shop-name">' + u.name + '</div><div class="shop-desc">' + u.desc + '</div><div class="shop-level">Level: ' + lvl + '/' + u.max + '</div></div><button class="shop-buy' + (maxed ? ' maxed' : '') + '"' + ((!canBuy) ? ' disabled' : '') + '>' + (maxed ? 'MAX' : ('💰 ' + cost)) + '</button>';
+      const btn = item.querySelector('button');
+      if (!maxed && canBuy) {
+        btn.addEventListener('click', function() {
+          if (data.totalKoin >= cost) {
+            data.totalKoin -= cost;
+            data.upgrades[key]++;
+            save();
+            renderShop();
+          }
+        });
+      }
+      shopList.appendChild(item);
+    }
+  }
+
+  document.getElementById('btnPlay').addEventListener('click', start);
+  document.getElementById('btnShop').addEventListener('click', function() {
+    menu.classList.add('hidden');
+    shop.classList.remove('hidden');
+    renderShop();
+  });
+  document.getElementById('btnBack').addEventListener('click', showMenu);
+  document.getElementById('btnReset').addEventListener('click', function() {
+    if (confirm('Reset semua progress? Koin & upgrade akan hilang.')) {
+      data = { totalKoin: 0, best: 0, upgrades: { speed: 0, jump: 0, magnet: 0, shield: 0, slowmo: 0 } };
+      save();
+      showMenu();
+    }
+  });
+
+  function handleTap(e) {
+    if (e) e.preventDefault();
+    jump();
+  }
+  cv.addEventListener('touchstart', handleTap, { passive: false });
+  cv.addEventListener('mousedown', handleTap);
+  document.addEventListener('keydown', function(e) {
+    if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); jump(); }
+  });
+
+  showMenu();
+  draw();
+})();
+</script>
+</body>
+</html>
