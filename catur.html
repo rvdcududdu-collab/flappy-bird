@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Catur Multiplayer</title>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; min-height: 100vh; background: #0f1420; overflow-x: hidden; user-select: none; font-family: Arial, sans-serif; color: #fff; }
+#app { display: flex; flex-direction: column; align-items: center; padding: 8px; min-height: 100vh; }
+#topbar { width: 100%; max-width: 480px; background: linear-gradient(135deg, #2a2a4a, #1a1a30); border-radius: 12px; padding: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #333; }
+.player { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; }
+.player.active { background: rgba(255, 215, 0, 0.15); box-shadow: 0 0 15px rgba(255, 215, 0, 0.3); }
+.player-icon { font-size: 22px; }
+.player-name { font-size: 12px; color: #aaa; }
+.player-captured { font-size: 14px; color: #ffd700; min-height: 18px; letter-spacing: -2px; }
+#vs { color: #ffd700; font-weight: bold; font-size: 14px; }
+#status { width: 100%; max-width: 480px; text-align: center; padding: 10px; margin-bottom: 10px; background: #1a1a30; border-radius: 10px; font-size: 15px; font-weight: 600; border: 1px solid #333; min-height: 42px; display: flex; align-items: center; justify-content: center; }
+#status.check { background: #4a1a1a; color: #ff6666; }
+#status.win { background: #1a4a1a; color: #66ff66; }
+#status.info { background: #1a3a5a; color: #66aaff; }
+#boardWrap { position: relative; width: min(94vw, 460px); height: min(94vw, 460px); border-radius: 10px; padding: 6px; background: linear-gradient(135deg, #4a3728, #2a1f15); box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-bottom: 10px; }
+#board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: 100%; height: 100%; border-radius: 6px; overflow: hidden; }
+.sq { display: flex; align-items: center; justify-content: center; font-size: min(9.5vw, 42px); cursor: pointer; position: relative; line-height: 1; }
+.light { background: #f0d9b5; }
+.dark { background: #b58863; }
+.sq.sel { background: #f7e07a !important; box-shadow: inset 0 0 0 3px #ffb700; }
+.sq.valid::after { content: ''; position: absolute; width: 30%; height: 30%; background: rgba(0, 150, 0, 0.55); border-radius: 50%; z-index: 1; }
+.sq.cap { background: #d44 !important; }
+.sq.last { box-shadow: inset 0 0 0 3px #4a90d9; }
+.sq.check { background: #d44 !important; animation: cp 0.6s infinite; }
+@keyframes cp { 0%, 100% { box-shadow: inset 0 0 0 3px #900; } 50% { box-shadow: inset 0 0 0 5px #ff0; } }
+.piece { position: relative; z-index: 2; }
+.piece-w { color: #fff; text-shadow: 1px 1px 0 #333, -1px -1px 0 #333, 1px -1px 0 #333, -1px 1px 0 #333; }
+.piece-b { color: #111; text-shadow: 1px 1px 0 #ccc, -1px -1px 0 #ccc, 1px -1px 0 #ccc, -1px 1px 0 #ccc; }
+.coord-f { position: absolute; bottom: 1px; right: 3px; font-size: 9px; font-weight: bold; opacity: 0.6; z-index: 3; }
+.coord-r { position: absolute; top: 1px; left: 3px; font-size: 9px; font-weight: bold; opacity: 0.6; z-index: 3; }
+.light .coord-f, .light .coord-r { color: #b58863; }
+.dark .coord-f, .dark .coord-r { color: #f0d9b5; }
+#controls { display: flex; gap: 8px; margin-bottom: 10px; max-width: 480px; justify-content: center; flex-wrap: wrap; }
+.btn { padding: 9px 14px; font-size: 13px; font-weight: bold; border-radius: 8px; background: #2a2a4a; color: #fff; border: 1px solid #444; cursor: pointer; }
+.btn.primary { background: #4a90d9; }
+.btn.danger { background: #a33; }
+#history { width: 100%; max-width: 480px; max-height: 100px; overflow-y: auto; background: #1a1a30; border-radius: 10px; padding: 8px 12px; font-size: 12px; border: 1px solid #333; margin-bottom: 10px; }
+.move-row { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid #252540; }
+.move-num { color: #888; min-width: 26px; }
+.move-w { color: #ffd700; min-width: 55px; }
+.move-b { color: #4a90d9; min-width: 55px; }
+#overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; text-align: center; padding: 20px; overflow-y: auto; }
+#overlay h1 { color: #ffd700; margin-bottom: 15px; font-size: 28px; }
+#overlay p { margin: 5px 0; color: #ccc; font-size: 14px; }
+#overlay input { padding: 12px 16px; font-size: 18px; border-radius: 10px; border: 2px solid #4a90d9; background: #0a0e1a; color: #fff; text-align: center; margin: 10px 0; width: 240px; outline: none; text-transform: uppercase; letter-spacing: 2px; }
+#overlay .mode-btn { margin: 5px; padding: 14px 30px; font-size: 16px; font-weight: bold; border: none; border-radius: 10px; cursor: pointer; min-width: 240px; }
+#overlay .mode-btn.bot { background: #4a90d9; color: #fff; }
+#overlay .mode-btn.player { background: #4a9c4a; color: #fff; }
+#overlay .mode-btn.online { background: #9c4a9c; color: #fff; }
+#overlay .mode-btn.join { background: #ff9800; color: #fff; }
+#overlay .mode-btn.back { background: #444; color: #fff; font-size: 14px; padding: 10px 20px; margin-top: 15px; min-width: 140px; }
+#roomCode { font-size: 32px; color: #ffd700; letter-spacing: 4px; font-weight: bold; padding: 15px; background: #1a1a30; border-radius: 10px; border: 2px dashed #ffd700; margin: 15px 0; word-break: break-all; }
+.copy-btn { background: #4a9c4a; color: #fff; padding: 10px 20px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; margin: 5px; }
+.hidden { display: none !important; }
+.step { margin: 12px 0; padding: 12px; background: #1a1a30; border-radius: 10px; border-left: 3px solid #ffd700; text-align: left; max-width: 400px; }
+.step b { color: #ffd700; }
+</style>
+</head>
+<body>
+<div id="app">
+<div id="topbar">
+<div class="player" id="p1"><span class="player-icon">♔</span><div><div class="player-name" id="p1name">Putih</div><div class="player-captured" id="cap1"></div></div></div>
+<div id="vs">VS</div>
+<div class="player" id="p2"><div style="text-align:right"><div class="player-name" id="p2name">Hitam</div><div class="player-captured" id="cap2"></div></div><span class="player-icon">♚</span></div>
+</div>
+<div id="status">Pilih mode untuk memulai</div>
+<div id="boardWrap"><div id="board"></div></div>
+<div id="controls">
+<button class="btn" id="btnUndo">Undo</button>
+<button class="btn danger" id="btnResign">Menyerah</button>
+<button class="btn primary" id="btnNew">Menu</button>
+</div>
+<div id="history">Belum ada gerakan</div>
+</div>
+
+<div id="overlay">
+<div id="menuMain">
+<h1>♔ CATUR MULTIPLAYER ♚</h1>
+<p>Pilih mode permainan:</p>
+<button class="mode-btn online" id="btnOnline">🌐 Online (Jarak Jauh)</button>
+<button class="mode-btn player" id="btnLocal">👥 2 Pemain (Satu HP)</button>
+<button class="mode-btn bot" id="btnBot">🤖 Lawan Bot</button>
+</div>
+
+<div id="menuOnline" class="hidden">
+<h1>🌐 Online Mode</h1>
+<p>Main jarak jauh dengan teman</p>
+<button class="mode-btn online" id="btnHost">Buat Room (Host)</button>
+<button class="mode-btn join" id="btnJoin">Join Room (Teman)</button>
+<button class="mode-btn back" id="btnBack1">Kembali</button>
+</div>
+
+<div id="menuHost" class="hidden">
+<h1>Room Kamu</h1>
+<p>Bagikan kode ini ke temanmu:</p>
+<div id="roomCode">----</div>
+<button class="copy-btn" id="btnCopy">📋 Copy Kode</button>
+<div class="step">
+<b>Langkah:</b><br>
+1. Copy kode di atas<br>
+2. Kirim ke teman (WA/chat)<br>
+3. Teman buka link ini<br>
+4. Teman klik "Join Room"<br>
+5. Masukin kode ini<br>
+6. Game mulai!
+</div>
+<p id="hostStatus" style="color:#ffd700;margin-top:15px;">⏳ Menunggu teman join...</p>
+<button class="mode-btn back" id="btnBack2">Batal</button>
+</div>
+
+<div id="menuJoin" class="hidden">
+<h1>Join Room</h1>
+<p>Masukin kode dari temanmu:</p>
+<input type="text" id="inputCode" placeholder="CATUR-XXXX" maxlength="20">
+<button class="mode-btn join" id="btnJoinGo">Gabung</button>
+<button class="mode-btn back" id="btnBack3">Kembali</button>
+<p id="joinStatus" style="color:#ffa500;margin-top:10px;"></p>
+</div>
+</div>
+<script>
+(function(){
+  const boardEl = document.getElementById('board');
+  const statusEl = document.getElementById('status');
+  const overlay = document.getElementById('overlay');
+  const cap1El = document.getElementById('cap1');
+  const cap2El = document.getElementById('cap2');
+  const p1El = document.getElementById('p1');
+  const p2El = document.getElementById('p2');
+  const histEl = document.getElementById('history');
+  const p1NameEl = document.getElementById('p1name');
+  const p2NameEl = document.getElementById('p2name');
+
+  const INIT = [
+    ['bR','bN','bB','bQ','bK','bB','bN','bR'],
+    ['bP','bP','bP','bP','bP','bP','bP','bP'],
+    ['','','','','','','',''],['','','','','','','',''],
+    ['','','','','','','',''],['','','','','','','',''],
+    ['wP','wP','wP','wP','wP','wP','wP','wP'],
+    ['wR','wN','wB','wQ','wK','wB','wN','wR']
+  ];
+  const DISP = {'wK':'\u2654','wQ':'\u2655','wR':'\u2656','wB':'\u2657','wN':'\u2658','wP':'\u2659','bK':'\u265A','bQ':'\u265B','bR':'\u265C','bB':'\u265D','bN':'\u265E','bP':'\u265F'};
+  const FILES = ['a','b','c','d','e','f','g','h'];
+
+  let board, turn, selected, validMoves, mode, gameOver, history, lastMove, captured, historyStack;
+  let myColor = null; // 'w' atau 'b' (untuk online)
+  let peer = null, conn = null, isHost = false;
+
+  function initGame(m, color) {
+    board = INIT.map(r => r.slice());
+    turn = 'w';
+    selected = null; validMoves = [];
+    mode = m; gameOver = false;
+    history = []; captured = { w: [], b: [] }; historyStack = []; lastMove = null;
+    myColor = color || null;
+    p1NameEl.textContent = m === 'online' ? (isHost ? 'Kamu' : 'Teman') : 'Putih';
+    p2NameEl.textContent = m === 'online' ? (isHost ? 'Teman' : 'Kamu') : 'Hitam';
+    overlay.classList.add('hidden');
+    statusEl.classList.remove('check','win');
+    statusEl.textContent = 'Giliran Putih';
+    updateCaptured(); renderHistory(); render();
+  }
+  function inBoard(r,c){ return r>=0 && r<8 && c>=0 && c<8; }
+  function colorOf(p){ return p ? p[0] : null; }
+  function typeOf(p){ return p ? p[1] : null; }
+
+  function getRawMoves(b, r, c) {
+    const p = b[r][c]; if (!p) return [];
+    const color = colorOf(p), type = typeOf(p);
+    const moves = [];
+    const add = (nr,nc) => { if (!inBoard(nr,nc)) return; const t=b[nr][nc]; if (!t) moves.push([nr,nc]); else if (colorOf(t)!==color) moves.push([nr,nc]); };
+    const slide = (dr,dc) => { let nr=r+dr,nc=c+dc; while(inBoard(nr,nc)){ const t=b[nr][nc]; if(!t) moves.push([nr,nc]); else { if(colorOf(t)!==color) moves.push([nr,nc]); break; } nr+=dr; nc+=dc; } };
+    if (type === 'P') {
+      const dir = color==='w'?-1:1; const start = color==='w'?6:1;
+      if (inBoard(r+dir,c) && !b[r+dir][c]) { moves.push([r+dir,c]); if (r===start && !b[r+2*dir][c]) moves.push([r+2*dir,c]); }
+      [[dir,-1],[dir,1]].forEach(([dr,dc]) => { const nr=r+dr,nc=c+dc; if(inBoard(nr,nc) && b[nr][nc] && colorOf(b[nr][nc])!==color) moves.push([nr,nc]); });
+    } else if (type==='N') { [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([dr,dc]) => add(r+dr,c+dc)); }
+    else if (type==='B') { slide(-1,-1); slide(-1,1); slide(1,-1); slide(1,1); }
+    else if (type==='R') { slide(-1,0); slide(1,0); slide(0,-1); slide(0,1); }
+    else if (type==='Q') { slide(-1,-1); slide(-1,1); slide(1,-1); slide(1,1); slide(-1,0); slide(1,0); slide(0,-1); slide(0,1); }
+    else if (type==='K') { [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].forEach(([dr,dc]) => add(r+dr,c+dc)); }
+    return moves;
+  }
+  function findKing(b, color) { for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(b[r][c]===color+'K') return [r,c]; return null; }
+  function isSquareAttacked(b, r, c, byColor) {
+    for(let rr=0;rr<8;rr++) for(let cc=0;cc<8;cc++){
+      const p=b[rr][cc]; if(!p || colorOf(p)!==byColor) continue;
+      if (getRawMoves(b,rr,cc).some(m=>m[0]===r&&m[1]===c)) return true;
+    }
+    return false;
+  }
+  function isInCheck(b, color) { const k=findKing(b,color); if(!k) return false; const opp=color==='w'?'b':'w'; return isSquareAttacked(b,k[0],k[1],opp); }
+  function isMoveSafe(b, fr, fc, tr, tc, color) { const t=b.map(r=>r.slice()); t[tr][tc]=t[fr][fc]; t[fr][fc]=''; return !isInCheck(t, color); }
+  function getMoves(b, r, c) {
+    const p=b[r][c]; if(!p) return [];
+    const color=colorOf(p);
+    return getRawMoves(b,r,c).filter(([tr,tc]) => {
+      const target=b[tr][tc];
+      if (target && typeOf(target)==='K') return false;
+      return isMoveSafe(b,r,c,tr,tc,color);
+    });
+  }
+  function hasAnyValidMove(b, color) {
+    for(let r=0;r<8;r++) for(let c=0;c<8;c++){
+      const p=b[r][c]; if(p && colorOf(p)===color && getMoves(b,r,c).length>0) return true;
+    }
+    return false;
+  }
+
+  function render() {
+    boardEl.innerHTML = '';
+    const kc = isInCheck(board, turn) ? findKing(board, turn) : null;
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const sq = document.createElement('div');
+        sq.className = 'sq ' + ((r+c)%2 === 0 ? 'light' : 'dark');
+        const p = board[r][c];
+        if (p) { const s = document.createElement('span'); s.textContent = DISP[p]; s.className = 'piece ' + (p[0]==='w'?'piece-w':'piece-b'); sq.appendChild(s); }
+        if (c === 0) { const l = document.createElement('span'); l.className='coord-r'; l.textContent = 8-r; sq.appendChild(l); }
+        if (r === 7) { const l = document.createElement('span'); l.className='coord-f'; l.textContent = FILES[c]; sq.appendChild(l); }
+        if (selected && selected[0]===r && selected[1]===c) sq.classList.add('sel');
+        if (validMoves.some(m=>m[0]===r&&m[1]===c)) { if (board[r][c]) sq.classList.add('cap'); else sq.classList.add('valid'); }
+        if (lastMove && ((lastMove.from[0]===r&&lastMove.from[1]===c)||(lastMove.to[0]===r&&lastMove.to[1]===c))) sq.classList.add('last');
+        if (kc && kc[0]===r && kc[1]===c) sq.classList.add('check');
+        sq.addEventListener('click', () => clickSq(r, c));
+        boardEl.appendChild(sq);
+      }
+    }
+    if (turn === 'w') { p1El.classList.add('active'); p2El.classList.remove('active'); }
+    else { p2El.classList.add('active'); p1El.classList.remove('active'); }
+  }
+  function updateCaptured() { cap1El.textContent = captured.b.map(p=>DISP['w'+p]).join(''); cap2El.textContent = captured.w.map(p=>DISP['b'+p]).join(''); }
+  function renderHistory() {
+    if (history.length === 0) { histEl.innerHTML = 'Belum ada gerakan'; return; }
+    histEl.innerHTML = '';
+    for(let i=0;i<history.length;i+=2){
+      const row = document.createElement('div'); row.className='move-row';
+      const n=document.createElement('span'); n.className='move-num'; n.textContent=(i/2+1)+'.';
+      const w=document.createElement('span'); w.className='move-w'; w.textContent=history[i]||'';
+      const b=document.createElement('span'); b.className='move-b'; b.textContent=history[i+1]||'';
+      row.appendChild(n); row.appendChild(w); row.appendChild(b);
+      histEl.appendChild(row);
+    }
+    histEl.scrollTop = histEl.scrollHeight;
+  }
+
+  function clickSq(r, c) {
+    if (gameOver) return;
+    if (mode === 'bot' && turn === 'b') return;
+    if (mode === 'online' && turn !== myColor) return;
+    const p = board[r][c];
+    if (selected && validMoves.some(m=>m[0]===r&&m[1]===c)) { move(selected[0],selected[1],r,c); return; }
+    if (p && colorOf(p) === turn) { selected=[r,c]; validMoves=getMoves(board,r,c); render(); }
+    else { selected=null; validMoves=[]; render(); }
+  }
+
+  function move(fr, fc, tr, tc, fromRemote) {
+    historyStack.push(JSON.stringify({board,turn,captured,history,lastMove}));
+    const p = board[fr][fc];
+    const cap = board[tr][tc];
+    if (cap) captured[turn].push(cap[1]);
+    board[tr][tc] = p;
+    board[fr][fc] = '';
+    lastMove = { from:[fr,fc], to:[tr,tc] };
+    history.push(FILES[fc]+(8-fr)+(cap?'x':'-')+FILES[tc]+(8-tr));
+    selected=null; validMoves=[];
+    turn = turn==='w'?'b':'w';
+    updateCaptured(); renderHistory(); render();
+
+    // Kirim ke lawan kalau online
+    if (mode === 'online' && !fromRemote && conn && conn.open) {
+      conn.send({ type: 'move', from: [fr,fc], to: [tr,tc] });
+    }
+
+    const inCheck = isInCheck(board, turn);
+    const hasMove = hasAnyValidMove(board, turn);
+    const cn = turn==='w'?'Putih':'Hitam';
+    const winner = turn==='w'?'Hitam':'Putih';
+
+    if (inCheck && !hasMove) {
+      gameOver = true;
+      statusEl.textContent = 'CHECKMATE! ' + winner + ' MENANG!';
+      statusEl.classList.add('win');
+      statusEl.classList.remove('check');
+      showGameOver(winner, 'checkmate');
+      if (mode==='online' && !fromRemote && conn && conn.open) conn.send({type:'gameover', winner});
+      return;
+    }
+    if (!inCheck && !hasMove) {
+      gameOver = true;
+      statusEl.textContent = 'STALEMATE! Seri.';
+      statusEl.classList.remove('check');
+      showGameOver('Seri', 'stalemate');
+      if (mode==='online' && !fromRemote && conn && conn.open) conn.send({type:'gameover', winner:'Seri'});
+      return;
+    }
+    if (inCheck) { statusEl.textContent = cn + ' di-SEKAK!'; statusEl.classList.add('check'); }
+    else { statusEl.textContent = 'Giliran ' + cn; statusEl.classList.remove('check'); }
+
+    if (mode === 'bot' && turn === 'b' && !gameOver) setTimeout(botMove, 400);
+  }
+
+  function showGameOver(winner, reason) {
+    document.getElementById('menuMain').classList.add('hidden');
+    document.getElementById('menuOnline').classList.add('hidden');
+    document.getElementById('menuHost').classList.add('hidden');
+    document.getElementById('menuJoin').classList.add('hidden');
+    const h = overlay.querySelector('h1');
+    h.textContent = reason === 'checkmate' ? 'CHECKMATE!' : 'SERI';
+    h.style.color = reason === 'checkmate' ? '#ffd700' : '#4a90d9';
+    overlay.querySelector('p').textContent = reason === 'checkmate' ? winner + ' MENANG!' : 'Game berakhir seri';
+    overlay.classList.remove('hidden');
+    // Sembunyiin tombol mode, tampil cuma h1 + p
+    document.getElementById('menuMain').classList.add('hidden');
+  }
+
+  function botMove() {
+    if (gameOver) return;
+    const all = [];
+    for(let r=0;r<8;r++) for(let c=0;c<8;c++){
+      if(board[r][c] && board[r][c][0]==='b'){
+        const m = getMoves(board,r,c);
+        m.forEach(x => {
+          const t = board[x[0]][x[1]];
+          const sc = t ? (t[1]==='Q'?100:t[1]==='R'?50:(t[1]==='B'||t[1]==='N')?30:10) : 0;
+          all.push({from:[r,c], to:x, score: sc+Math.random()*5});
+        });
+      }
+    }
+    if (all.length===0) return;
+    all.sort((a,b)=>b.score-a.score);
+    const b = all.slice(0, Math.min(3, all.length));
+    const pick = b[Math.floor(Math.random()*b.length)];
+    move(pick.from[0], pick.from[1], pick.to[0], pick.to[1]);
+  }
+
+  // ===== PeerJS Online =====
+  function startHost() {
+    const code = 'CATUR-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+    document.getElementById('roomCode').textContent = code;
+    document.getElementById('menuOnline').classList.add('hidden');
+    document.getElementById('menuHost').classList.remove('hidden');
+    document.getElementById('hostStatus').textContent = '⏳ Menunggu teman join...';
+    isHost = true;
+    peer = new Peer(code, { debug: 1 });
+    peer.on('open', (id) => {
+      document.getElementById('hostStatus').textContent = '✅ Room siap! Kode: ' + id;
+    });
+    peer.on('connection', (c) => {
+      conn = c;
+      document.getElementById('hostStatus').textContent = '✅ Teman terhubung! Game mulai...';
+      conn.on('open', () => {
+        myColor = 'w';
+        setTimeout(() => initGame('online', 'w'), 500);
+      });
+      conn.on('data', (data) => {
+        if (data.type === 'move') {
+          move(data.from[0], data.from[1], data.to[0], data.to[1], true);
+        }
+        if (data.type === 'gameover') {
+          gameOver = true;
+          statusEl.textContent = 'GAME OVER: ' + data.winner + ' MENANG!';
+          statusEl.classList.add('win');
+        }
+        if (data.type === 'resign') {
+          gameOver = true;
+          statusEl.textContent = 'Lawan menyerah. KAMU MENANG!';
+          statusEl.classList.add('win');
+        }
+      });
+    });
+    peer.on('error', (err) => {
+      document.getElementById('hostStatus').textContent = '❌ Error: ' + err.message;
+    });
+  }
+
+  function startJoin() {
+    const code = document.getElementById('inputCode').value.trim().toUpperCase();
+    if (!code) { document.getElementById('joinStatus').textContent = '⚠️ Masukin kode dulu'; return; }
+    document.getElementById('joinStatus').textContent = '⏳ Menghubungkan...';
+    isHost = false;
+    peer = new Peer({ debug: 1 });
+    peer.on('open', () => {
+      conn = peer.connect(code);
+      conn.on('open', () => {
+        document.getElementById('joinStatus').textContent = '✅ Terhubung! Game mulai...';
+        myColor = 'b';
+        setTimeout(() => initGame('online', 'b'), 500);
+      });
+      conn.on('data', (data) => {
+        if (data.type === 'move') {
+          move(data.from[0], data.from[1], data.to[0], data.to[1], true);
+        }
+        if (data.type === 'gameover') {
+          gameOver = true;
+          statusEl.textContent = 'GAME OVER: ' + data.winner + ' MENANG!';
+          statusEl.classList.add('win');
+        }
+        if (data.type === 'resign') {
+          gameOver = true;
+          statusEl.textContent = 'Lawan menyerah. KAMU MENANG!';
+          statusEl.classList.add('win');
+        }
+      });
+    });
+    peer.on('error', (err) => {
+      document.getElementById('joinStatus').textContent = '❌ Error: ' + err.message;
+    });
+  }
+
+  // ===== Menu Navigation =====
+  document.getElementById('btnOnline').addEventListener('click', () => {
+    document.getElementById('menuMain').classList.add('hidden');
+    document.getElementById('menuOnline').classList.remove('hidden');
+  });
+  document.getElementById('btnHost').addEventListener('click', startHost);
+  document.getElementById('btnJoin').addEventListener('click', () => {
+    document.getElementById('menuOnline').classList.add('hidden');
+    document.getElementById('menuJoin').classList.remove('hidden');
+  });
+  document.getElementById('btnJoinGo').addEventListener('click', startJoin);
+  document.getElementById('btnBack1').addEventListener('click', () => {
+    document.getElementById('menuOnline').classList.add('hidden');
+    document.getElementById('menuMain').classList.remove('hidden');
+  });
+  document.getElementById('btnBack2').addEventListener('click', () => {
+    if (peer) peer.destroy();
+    document.getElementById('menuHost').classList.add('hidden');
+    document.getElementById('menuOnline').classList.remove('hidden');
+  });
+  document.getElementById('btnBack3').addEventListener('click', () => {
+    document.getElementById('menuJoin').classList.add('hidden');
+    document.getElementById('menuOnline').classList.remove('hidden');
+  });
+  document.getElementById('btnCopy').addEventListener('click', () => {
+    const code = document.getElementById('roomCode').textContent;
+    navigator.clipboard.writeText(code).then(() => {
+      document.getElementById('btnCopy').textContent = '✅ Tersalin!';
+      setTimeout(() => { document.getElementById('btnCopy').textContent = '📋 Copy Kode'; }, 2000);
+    }).catch(() => {
+      document.getElementById('btnCopy').textContent = 'Copy manual: ' + code;
+    });
+  });
+
+  document.getElementById('btnLocal').addEventListener('click', () => {
+    document.getElementById('menuMain').classList.add('hidden');
+    initGame('local', null);
+  });
+  document.getElementById('btnBot').addEventListener('click', () => {
+    document.getElementById('menuMain').classList.add('hidden');
+    initGame('bot', null);
+  });
+
+  document.getElementById('btnUndo').addEventListener('click', () => {
+    if (historyStack.length === 0) return;
+    const st = JSON.parse(historyStack.pop());
+    board = st.board; turn = st.turn; captured = st.captured; history = st.history; lastMove = st.lastMove;
+    selected = null; validMoves = []; gameOver = false;
+    updateCaptured(); renderHistory(); render();
+    statusEl.textContent = 'Giliran ' + (turn==='w'?'Putih':'Hitam');
+    statusEl.classList.remove('check','win');
+  });
+
+  document.getElementById('btnResign').addEventListener('click', () => {
+    if (gameOver) return;
+    gameOver = true;
+    const loser = turn==='w'?'Putih':'Hitam';
+    const winner = turn==='w'?'Hitam':'Putih';
+    statusEl.textContent = loser + ' menyerah. ' + winner + ' MENANG!';
+    statusEl.classList.add('win');
+    if (mode==='online' && conn && conn.open) conn.send({type:'resign'});
+    showGameOver(winner, 'checkmate');
+  });
+
+  document.getElementById('btnNew').addEventListener('click', () => {
+    if (peer) { peer.destroy(); peer = null; conn = null; }
+    document.getElementById('menuMain').classList.remove('hidden');
+    document.getElementById('menuOnline').classList.add('hidden');
+    document.getElementById('menuHost').classList.add('hidden');
+    document.getElementById('menuJoin').classList.add('hidden');
+    overlay.classList.remove('hidden');
+  });
+})();
+</script>
+</body>
+</html>
