@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Flappy Bird</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #1a1a2e;
+    font-family: Arial, sans-serif;
+    overflow: hidden;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #gameWrap {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    display: block;
+    background: #4ec0ca;
+    max-width: 100%;
+    max-height: 100%;
+    touch-action: none;
+  }
+  #overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.75);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    z-index: 10;
+    text-align: center;
+    padding: 20px;
+  }
+  #overlay h1 {
+    font-size: 36px;
+    margin-bottom: 20px;
+    color: #ffd700;
+    text-shadow: 2px 2px 0 #000;
+  }
+  #overlay p {
+    font-size: 18px;
+    margin: 8px 0;
+    color: #ddd;
+  }
+  #overlay button {
+    margin-top: 30px;
+    padding: 15px 40px;
+    font-size: 20px;
+    font-weight: bold;
+    background: #ffd700;
+    color: #1a1a2e;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #b8860b;
+  }
+  #overlay button:active {
+    transform: translateY(4px);
+    box-shadow: 0 0 0 #b8860b;
+  }
+  #score {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 60px;
+    font-weight: bold;
+    color: white;
+    text-shadow: 3px 3px 0 #000;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="gameWrap">
+  <canvas id="game" width="400" height="700"></canvas>
+</div>
+<div id="score" class="hidden">0</div>
+
+<div id="overlay">
+  <h1>🐦 FLAPPY BIRD</h1>
+  <p>Tap layar untuk terbang</p>
+  <p>Hindari pipa hijau!</p>
+  <p style="margin-top:20px; color:#ffd700;">Skor Tertinggi: <span id="hiscore">0</span></p>
+  <button id="startBtn">MULAI</button>
+</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const scoreEl = document.getElementById('score');
+  const hiscoreEl = document.getElementById('hiscore');
+  const startBtn = document.getElementById('startBtn');
+
+  // Setting
+  const W = canvas.width;
+  const H = canvas.height;
+  const GRAVITY = 0.5;
+  const JUMP = -8;
+  const PIPE_W = 60;
+  const PIPE_GAP = 180;
+  const PIPE_SPEED = 2.5;
+  const PIPE_INTERVAL = 90; // frame
+
+  // State
+  let bird, pipes, score, frame, alive, started;
+  let hiscore = parseInt(localStorage.getItem('flappy_hiscore') || '0');
+  hiscoreEl.textContent = hiscore;
+
+  function reset() {
+    bird = { x: 100, y: H/2, vy: 0, r: 15, angle: 0 };
+    pipes = [];
+    score = 0;
+    frame = 0;
+    alive = true;
+    started = false;
+    scoreEl.textContent = '0';
+  }
+
+  function jump() {
+    if (!alive) return;
+    bird.vy = JUMP;
+  }
+
+  function spawnPipe() {
+    const minTop = 60;
+    const maxTop = H - PIPE_GAP - 60;
+    const topH = minTop + Math.random() * (maxTop - minTop);
+    pipes.push({
+      x: W,
+      topH: topH,
+      passed: false
+    });
+  }
+
+  function update() {
+    if (!started || !alive) return;
+    frame++;
+
+    // Bird physics
+    bird.vy += GRAVITY;
+    bird.y += bird.vy;
+    bird.angle = Math.max(-0.5, Math.min(1.2, bird.vy * 0.08));
+
+    // Spawn pipe
+    if (frame % PIPE_INTERVAL === 0) spawnPipe();
+
+    // Update pipes
+    for (let i = pipes.length - 1; i >= 0; i--) {
+      const p = pipes[i];
+      p.x -= PIPE_SPEED;
+
+      // Score
+      if (!p.passed && p.x + PIPE_W < bird.x) {
+        p.passed = true;
+        score++;
+        scoreEl.textContent = score;
+      }
+
+      // Remove off-screen
+      if (p.x + PIPE_W < 0) pipes.splice(i, 1);
+    }
+
+    // Collision
+    // Ground & ceiling
+    if (bird.y + bird.r >= H - 40) { alive = false; }
+    if (bird.y - bird.r <= 0) { bird.y = bird.r; bird.vy = 0; }
+
+    // Pipes
+    for (const p of pipes) {
+      if (bird.x + bird.r > p.x && bird.x - bird.r < p.x + PIPE_W) {
+        if (bird.y - bird.r < p.topH || bird.y + bird.r > p.topH + PIPE_GAP) {
+          alive = false;
+        }
+      }
+    }
+
+    if (!alive) {
+      if (score > hiscore) {
+        hiscore = score;
+        localStorage.setItem('flappy_hiscore', hiscore);
+      }
+      setTimeout(() => {
+        overlay.querySelector('h1').textContent = '💥 GAME OVER';
+        overlay.querySelector('h1').style.color = '#ff5555';
+        overlay.querySelectorAll('p')[0].textContent = 'Skor kamu: ' + score;
+        overlay.querySelectorAll('p')[1].textContent = 'Skor tertinggi: ' + hiscore;
+        overlay.querySelectorAll('p')[2].textContent = '';
+        hiscoreEl.textContent = hiscore;
+        startBtn.textContent = 'MAIN LAGI';
+        overlay.classList.remove('hidden');
+        scoreEl.classList.add('hidden');
+      }, 500);
+    }
+  }
+
+  function draw() {
+    // Sky
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#4ec0ca');
+    grad.addColorStop(1, '#87ceeb');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Clouds
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    for (let i = 0; i < 3; i++) {
+      const cx = ((frame * 0.5 + i * 200) % (W + 100)) - 100;
+      const cy = 80 + i * 40;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 25, 0, Math.PI * 2);
+      ctx.arc(cx + 25, cy, 30, 0, Math.PI * 2);
+      ctx.arc(cx + 55, cy, 25, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Pipes
+    for (const p of pipes) {
+      // Top pipe
+      ctx.fillStyle = '#5eb85e';
+      ctx.fillRect(p.x, 0, PIPE_W, p.topH);
+      ctx.fillStyle = '#3d8b3d';
+      ctx.fillRect(p.x, p.topH - 20, PIPE_W, 20);
+      // Bottom pipe
+      ctx.fillStyle = '#5eb85e';
+      ctx.fillRect(p.x, p.topH + PIPE_GAP, PIPE_W, H - p.topH - PIPE_GAP);
+      ctx.fillStyle = '#3d8b3d';
+      ctx.fillRect(p.x, p.topH + PIPE_GAP, PIPE_W, 20);
+    }
+
+    // Ground
+    ctx.fillStyle = '#ded895';
+    ctx.fillRect(0, H - 40, W, 40);
+    ctx.fillStyle = '#c7bd6e';
+    for (let i = 0; i < W; i += 20) {
+      ctx.fillRect(i + (frame % 20), H - 40, 10, 40);
+    }
+
+    // Bird
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    ctx.rotate(bird.angle);
+    // Body
+    ctx.fillStyle = '#ffd700';
+    ctx.beginPath();
+    ctx.arc(0, 0, bird.r, 0, Math.PI * 2);
+    ctx.fill();
+    // Outline
+    ctx.strokeStyle = '#b8860b';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Eye
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.arc(5, -4, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'black';
+    ctx.beginPath();
+    ctx.arc(6, -4, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    // Beak
+    ctx.fillStyle = '#ff6600';
+    ctx.beginPath();
+    ctx.moveTo(12, 0);
+    ctx.lineTo(22, 4);
+    ctx.lineTo(12, 8);
+    ctx.closePath();
+    ctx.fill();
+    // Wing
+    ctx.fillStyle = '#ffb700';
+    ctx.beginPath();
+    ctx.ellipse(-5, 2, 8, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Input
+  function handleInput(e) {
+    e.preventDefault();
+    if (!alive) return;
+    if (!started) {
+      started = true;
+      overlay.classList.add('hidden');
+      scoreEl.classList.remove('hidden');
+    }
+    jump();
+  }
+
+  canvas.addEventListener('touchstart', handleInput, { passive: false });
+  canvas.addEventListener('mousedown', handleInput);
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') handleInput(e);
+  });
+
+  startBtn.addEventListener('click', () => {
+    reset();
+    started = true;
+    overlay.classList.add('hidden');
+    scoreEl.classList.remove('hidden');
+  });
+
+  // Start
+  reset();
+  draw();
+  loop();
+})();
+</script>
+</body>
+</html>
